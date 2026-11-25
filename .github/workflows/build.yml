@@ -33,16 +33,8 @@ jobs:
               -not -path '*/.gradle/*' \
               -printf '%h\n' | head -n1)
 
-          elif [ -f "FridayPro" ]; then
-            mkdir -p extracted
-            unzip -qo FridayPro -d extracted
-
-            PROJECT_DIR=$(find extracted \
-              -name settings.gradle.kts \
-              -not -path '*/.gradle/*' \
-              -printf '%h\n' | head -n1)
           else
-            echo "FridayPro project not found!"
+            echo "FridayPro folder or ZIP not found!"
             exit 1
           fi
 
@@ -53,7 +45,6 @@ jobs:
           fi
 
           echo "PROJECT=$PROJECT_DIR" >> "$GITHUB_ENV"
-
           echo "Found project: $PROJECT_DIR"
 
       - name: Set up Java 17
@@ -65,7 +56,7 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
         with:
-          gradle-version: '8.9'
+          gradle-version: '8.14.8'
 
       - name: Build Friday APK
         shell: bash
@@ -86,8 +77,7 @@ jobs:
           fi
 
           cp "$APK" Friday.apk
-
-          echo "APK successfully generated!"
+          echo "Friday APK successfully generated!"
 
       - name: Upload Friday APK
         uses: actions/upload-artifact@v4
