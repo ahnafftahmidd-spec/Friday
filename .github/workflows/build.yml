@@ -1,24 +1,57 @@
 name: Build Friday APK
-on: [push, workflow_dispatch]
+on:
+  push:
+    paths-ignore: ['**.md']
+  workflow_dispatch:
+permissions:
+  contents: write
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: unzip -qo FridayPro.zip
-      - uses: actions/setup-java@v4
+
+      - name: Unpack project
+        run: |
+          if [ -f FridayPro.zip ]; then zip=FridayPro.zip; else zip=$(ls *.zip | head -n1); fi
+          echo "Using $zip"
+          unzip -qo "$zip"
+          dir=$(find . -maxdepth 2 -name settings.gradle.kts -printf '%h\n' | head -n1)
+          echo "Project folder: $dir"
+          echo "PROJECT=$dir" >> $GITHUB_ENV
+
+      - uses: actions/setup-java@v5
         with: { distribution: temurin, java-version: 17 }
+
       - uses: gradle/actions/setup-gradle@v4
         with: { gradle-version: 8.7 }
+
       - name: Build
-        working-directory: FridayPro
+        working-directory: ${{ env.PROJECT }}
         run: |
           set +e
           gradle assembleDebug --no-daemon --console=plain > build.log 2>&1
           code=$?
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          grep -E "^e: |What went wrong|error:" -A4 build.log | head -40 >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
+          if [ $code -ne 0 ]; then
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            grep -E "^e: |What went wrong|error:" -A4 build.log | head -40 >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+          cp app/build/outputs/apk/debug/app-debug.apk Friday.apk 2>/dev/null
           exit $code
-      - uses: actions/upload-artifact@v4
-        with: { name: Friday-apk, path: FridayPro/app/build/outputs/apk/debug/app-debug.apk }
+
+      - name: Save build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: ${{ env.PROJECT }}/build.log
+
+      - name: Publish release
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "build-${{ github.run_number }}" "$PROJECT/Friday.apk" \
+            --title "Friday build ${{ github.run_number }}" \
+            --notes "Download Friday.apk and tap it to install."
