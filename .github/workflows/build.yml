@@ -18,62 +18,68 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Unpack project
+      - name: Unpack FridayPro
         run: |
           if [ -f FridayPro.zip ]; then
-            zip=FridayPro.zip
+            ZIP_FILE="FridayPro.zip"
           else
-            zip=$(ls *.zip | head -n1)
+            ZIP_FILE=$(find . -maxdepth 1 -name '*.zip' | head -n1)
           fi
 
-          unzip -qo "$zip"
-
-          dir=$(find . -maxdepth 3 -name settings.gradle.kts -printf '%h\n' | head -n1)
-
-          if [ -z "$dir" ]; then
-            echo "Could not find settings.gradle.kts"
+          if [ -z "$ZIP_FILE" ]; then
+            echo "No project ZIP found!"
             exit 1
           fi
 
-          echo "PROJECT=$dir" >> "$GITHUB_ENV"
+          unzip -qo "$ZIP_FILE"
+
+          PROJECT_DIR=$(find . -name settings.gradle.kts \
+            -not -path '*/.gradle/*' \
+            -printf '%h\n' | head -n1)
+
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "settings.gradle.kts not found!"
+            exit 1
+          fi
+
+          echo "PROJECT=$PROJECT_DIR" >> "$GITHUB_ENV"
 
       - name: Set up Java 17
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: 17
+          java-version: '17'
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: 8.9
+          gradle-version: '8.9'
 
-      - name: Build debug APK
+      - name: Build Friday APK
         working-directory: ${{ env.PROJECT }}
         run: |
-          set +e
+          set -o pipefail
 
-          gradle assembleDebug --no-daemon --console=plain > build.log 2>&1
-          code=$?
+          gradle assembleDebug \
+            --no-daemon \
+            --stacktrace \
+            --console=plain 2>&1 | tee build.log
 
-          if [ $code -ne 0 ]; then
-            echo "## Build failed" >> "$GITHUB_STEP_SUMMARY"
-            echo '```text' >> "$GITHUB_STEP_SUMMARY"
+          APK="app/build/outputs/apk/debug/app-debug.apk"
 
-            grep -E \
-              "Caused by|Unsupported|major version|^e: |What went wrong|error:" \
-              -A3 build.log | head -70 >> "$GITHUB_STEP_SUMMARY"
-
-            echo '```' >> "$GITHUB_STEP_SUMMARY"
-
-            cat build.log
+          if [ ! -f "$APK" ]; then
+            echo "APK was not generated!"
+            exit 1
           fi
 
-          if [ $code -eq 0 ]; then
-            cp app/build/outputs/apk/debug/app-debug.apk Friday.apk
-          fi
+          cp "$APK" Friday.apk
 
-          exit $code
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Friday-apk
+          path: ${{ env.PROJECT }}/Friday.apk
+          retention-days: 14
 
       - name: Publish GitHub release
         if: success()
@@ -83,4 +89,4 @@ jobs:
           gh release create "build-${{ github.run_number }}" \
             "$PROJECT/Friday.apk" \
             --title "Friday build ${{ github.run_number }}" \
-            --notes "Download Friday.apk and tap it to install."
+            --notes "Download Friday.apk to install Friday."
